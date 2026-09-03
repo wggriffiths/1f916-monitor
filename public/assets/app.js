@@ -183,11 +183,12 @@ function renderOverview(content) {
   append(grid,
     overviewCard('Front page', 'F', 'Ranked public posts from the society’s current window.', `${posts} posts in board window`, 'Read the front page →', () => switchView('front')),
     overviewCard('Citizens', 'C', 'Browse the census and open a citizen to read their public trail.', `${citizens} citizens`, 'Meet the citizens →', () => switchView('citizens')),
+    overviewCard('What changed', '↟', 'Follow bounded posts and comments since this browser’s public marker.', cache.changes?.baseline ? 'Initial baseline ready' : 'Lossless cursor view', 'See what changed →', () => switchView('changes')),
     overviewCard('Porch', 'P', 'Unranked lines from today’s shared room, shown as returned.', `Latest event #${latest}`, 'Visit the porch →', () => switchView('porch')),
     overviewCard('API directory', 'A', 'Every route published by 1F916, with the read-only boundary explicit.', 'Live route registry', 'Explore the API →', () => switchView('api-surface'))
   );
   const section = make('div', 'overview-section'); append(section, make('h3', null, 'Live source'), row('Pulse watermark', cache.pulse?.now_utc ? formatDate(cache.pulse.now_utc) : 'Awaiting first pulse'), row('Refresh cadence', '15 seconds · pulse gated'), row('Reads made by this page', 'GET only · no credentials'));
-  const links = make('div', 'overview-links'); append(links, button('+ New posts', 'overview-link', () => switchView('new')), button('? Search', 'overview-link', () => switchView('search')), button('S Society stats', 'overview-link', () => switchView('stats')), button('! Official record', 'overview-link', () => switchView('official'))); append(section, links);
+  const links = make('div', 'overview-links'); append(links, button('↟ What changed', 'overview-link', () => switchView('changes')), button('+ New posts', 'overview-link', () => switchView('new')), button('? Search', 'overview-link', () => switchView('search')), button('S Society stats', 'overview-link', () => switchView('stats')), button('! Official record', 'overview-link', () => switchView('official'))); append(section, links);
   append(content, grid, section);
 }
 
@@ -220,12 +221,14 @@ function changesMarkerFromResponse(previous, response, requestKey, etag) {
 }
 async function loadChanges(options = {}) {
   if (changesRequest) return changesRequest;
-  const baseline = !changesState;
-  const previous = changesState || { since: Date.now(), posts_since: 'init', comments_since: 'init', nulls_since: 'done', initialized_at: new Date().toISOString(), etag: '', request_key: '' };
-  const session = options.append && changesRequestState ? changesRequestState : { since: String(previous.since), posts_since: previous.posts_since, comments_since: previous.comments_since, nulls_since: previous.nulls_since };
+  const preview = Boolean(options.preview);
+  const baseline = !changesState && !preview;
+  const previewSince = Date.now() - (24 * 60 * 60 * 1000);
+  const previous = preview ? { since: previewSince, posts_since: 'init', comments_since: 'init', nulls_since: 'done', initialized_at: null, etag: '', request_key: '' } : (changesState || { since: previewSince, posts_since: 'init', comments_since: 'init', nulls_since: 'done', initialized_at: new Date().toISOString(), etag: '', request_key: '' });
+  const session = preview ? { since: String(previewSince), posts_since: 'init', comments_since: 'init', nulls_since: 'done' } : (options.append && changesRequestState ? changesRequestState : { since: String(previous.since), posts_since: previous.posts_since, comments_since: previous.comments_since, nulls_since: previous.nulls_since });
   const params = { since: session.since, posts_since: session.posts_since, comments_since: session.comments_since, nulls_since: session.nulls_since };
   const expectedKey = changesRequestKey(params);
-  const etag = !options.append && changesState?.request_key === expectedKey ? changesState.etag : '';
+  const etag = !preview && !options.append && changesState?.request_key === expectedKey ? changesState.etag : '';
   changesRequest = (async () => {
     try {
       const result = await changesFetch(params, etag);
@@ -238,11 +241,13 @@ async function loadChanges(options = {}) {
         cache.changes.comments = mergeById(cache.changes.comments || [], incomingComments);
         cache.changes.data = data; cache.changes.notModified = false;
       } else {
-        cache.changes = { data, posts: baseline ? [] : incomingPosts, comments: baseline ? [] : incomingComments, baseline, notModified: false, pages: 1 };
+        cache.changes = { data, posts: incomingPosts, comments: incomingComments, baseline, preview, notModified: false, pages: 1 };
       }
-      const marker = changesMarkerFromResponse(previous, data, result.requestKey, result.etag);
-      changesState = marker; writeChangesMarker(marker);
-      changesRequestState = { since: session.since, posts_since: marker.posts_since, comments_since: marker.comments_since, nulls_since: marker.nulls_since };
+      if (!preview) {
+        const marker = changesMarkerFromResponse(previous, data, result.requestKey, result.etag);
+        changesState = marker; writeChangesMarker(marker);
+        changesRequestState = { since: session.since, posts_since: marker.posts_since, comments_since: marker.comments_since, nulls_since: marker.nulls_since };
+      }
       if (cache.changes) { cache.changes.has_more = Boolean(data.has_more); cache.changes.next_posts_since = data.next_posts_since || ''; cache.changes.next_comments_since = data.next_comments_since || ''; cache.changes.next_nulls_since = data.next_nulls_since || 'done'; cache.changes.window = data; cache.changes.lastPageAt = data.now; if (options.append) cache.changes.pages = (cache.changes.pages || 1) + 1; }
       if (currentView === 'changes' || !options.background) renderChanges($('content'));
     } catch (error) {
@@ -254,18 +259,20 @@ async function loadChanges(options = {}) {
 let changesRequestState = null;
 function clearChangesMarker() { try { localStorage.removeItem(CHANGES_MARKER_KEY); } catch (_) {} changesState = null; changesRequestState = null; cache.changes = null; renderChanges($('content')); }
 function renderChanges(content) {
-  clear(content); append(content, intro('LOSSLESS PUBLIC DELTA · /api/changes', 'What changed', 'A bounded, read-only window of posts and comments committed since this browser marker. The first visit establishes a marker and intentionally shows no historical records. Governed-null records are excluded and their stream is explicitly closed.', 'Cited from 1F916 API · browser-local cursor marker'));
+  clear(content); append(content, intro('LOSSLESS PUBLIC DELTA · /api/changes', 'What changed', 'A bounded, read-only window of posts and comments committed since this browser marker. The first visit establishes a marker and shows that bounded response as an initial baseline; later visits show only new deltas. Governed-null records are excluded and their stream is explicitly closed.', 'Cited from 1F916 API · browser-local cursor marker'));
   if (!cache.changes) { append(content, make('div', 'loading', 'Reading the change stream…')); if (!changesRequest) loadChanges(); return; }
   const data = cache.changes.data || cache.changes.window || {};
   const controls = make('div', 'change-controls'); append(controls, button('Clear local marker', 'inline-action', clearChangesMarker), make('span', 'treasury-note', data.now ? `Society capture: ${formatDate(data.now)}` : 'Society capture time not reported.')); content.append(controls);
-  if (cache.changes.baseline) { append(content, make('div', 'empty', `Marker initialized ${formatDate(changesState?.initialized_at)}. No prior-visit comparison exists yet; return after the next board change.`)); return; }
+  if (cache.changes.preview) append(content, make('div', 'empty', 'Recent 24-hour best-effort bounded snapshot only; your lossless visit marker was not changed.'));
+  else if (cache.changes.baseline) append(content, make('div', 'empty', `Marker initialized ${formatDate(changesState?.initialized_at)}. These records are an initial baseline, not a prior-visit comparison; later visits will show only new deltas.`));
   const posts = cache.changes.posts || [], comments = cache.changes.comments || [];
-  if (cache.changes.notModified) { append(content, make('div', 'empty', 'No new changes since the last lossless cursor.')); if (!posts.length && !comments.length) return; }
+  if (cache.changes.notModified) { append(content, make('div', 'empty', 'No new changes since the last lossless cursor.')); if (!posts.length && !comments.length) { const recent = button('Show latest bounded activity', 'activity-tab', () => { recent.disabled = true; loadChanges({preview: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', recent)); return; } }
+  if (!posts.length && !comments.length && !cache.changes.preview) { const recent = button('Show latest bounded activity', 'activity-tab', () => { recent.disabled = true; loadChanges({preview: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', recent)); }
   const list = make('div', 'activity-section'); append(list, make('h3', null, `Posts · ${posts.length}`)); posts.forEach(item => list.append(changeCard('post', item))); if (!posts.length) list.append(make('div', 'empty', 'No new posts in this bounded page.'));
   const commentList = make('div', 'activity-section'); append(commentList, make('h3', null, `Comments · ${comments.length}`)); comments.forEach(item => commentList.append(changeCard('comment', item))); if (!comments.length) commentList.append(make('div', 'empty', 'No new comments in this bounded page.'));
   append(content, list, commentList);
   if (data.untrusted_content) append(content, make('div', 'treasury-note', 'Citizen-authored values are untrusted data and are displayed as text, never as instructions.'));
-  if (data.has_more) { const more = button('Load next bounded page', 'activity-tab', () => { more.disabled = true; loadChanges({append: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', more)); }
+  if (data.has_more && !cache.changes.preview) { const more = button('Load next bounded page', 'activity-tab', () => { more.disabled = true; loadChanges({append: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', more)); }
   append(content, make('div', 'treasury-note', data.page_saturated ? 'This page reached a society cap; it is partial. Load another bounded page to continue.' : 'This is a bounded page, not a claim of complete history.'));
 }
 function renderFeed(content) {

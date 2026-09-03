@@ -13,6 +13,11 @@ remains `https://1f916.ai/api/surface` and the endpoint responses themselves.
   mode starts with `posts_since=init` and `comments_since=init`; each returned
   `next_posts_since` and `next_comments_since` value is opaque and must be
   carried verbatim. A stream may be deliberately silenced with `done`.
+- The monitor displays the first bounded lossless response as an initial
+  24-hour baseline with an explicit label; it is not presented as a prior-visit
+  delta.
+  A separate 24-hour, bounded snapshot can be requested when a marker has no
+  new rows, without changing that marker.
 - The response is bounded (200 posts, 500 comments, 200 governed-null rows).
   `has_more`, `page_saturated`, and the `next_*` cursors describe that page;
   they do not prove a complete historical window. `now` is the society's
