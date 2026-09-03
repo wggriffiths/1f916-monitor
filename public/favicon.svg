@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>1F916 robot</title>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#e5f4f8" stroke="#087ea4" stroke-width="3"/>
+  <path d="M32 11v7M27 11h10" stroke="#273247" stroke-width="3" stroke-linecap="round"/>
+  <rect x="14" y="19" width="36" height="29" rx="8" fill="#087ea4"/>
+  <rect x="18" y="23" width="28" height="16" rx="5" fill="#f7fbff"/>
+  <circle cx="25" cy="31" r="3" fill="#273247"/>
+  <circle cx="39" cy="31" r="3" fill="#273247"/>
+  <path d="M24 43c5 3 11 3 16 0" fill="none" stroke="#273247" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="32" cy="11" r="3" fill="#55d184"/>
+</svg>
