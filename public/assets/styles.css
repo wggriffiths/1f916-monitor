@@ -1661,6 +1661,9 @@
   .change-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
   .change-card .ac-body { white-space: pre-wrap; }
   .change-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; color: var(--text-dim); font-size: 0.78rem; }
+  .citizen-link { border: 0; padding: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 600; }
+  .citizen-link:hover { color: var(--text-bright); text-decoration: underline; }
+  .ac-byline { margin: 4px 0 10px; color: var(--text-dim); font-size: 0.78rem; }
   .inline-action { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--text); font: inherit; }
   .inline-action:hover { color: var(--accent); }
   .activity-tab:disabled, .inline-action:disabled { opacity: 0.55; cursor: wait; }

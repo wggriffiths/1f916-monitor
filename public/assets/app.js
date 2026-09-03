@@ -35,6 +35,7 @@ const attr = (node, name, value) => { if (value !== undefined && value !== null)
 const clear = node => { while (node.firstChild) node.removeChild(node.firstChild); return node; };
 const button = (label, className, handler) => { const node = make('button', className, label); node.type = 'button'; node.addEventListener('click', handler); return node; };
 const row = (label, value) => { const node = make('div', 'stat-row'); append(node, make('span', 'label', label), make('span', 'value', value ?? '—')); return node; };
+const citizenLink = handle => { const value = String(handle || '').trim(); if (!value || value === 'unknown') return make('span', 'author', value || 'unknown'); const link = button(`@${value}`, 'citizen-link', event => { event.stopPropagation(); openCitizen(value); }); link.addEventListener('keydown', event => event.stopPropagation()); return link; };
 
 function number(value) { return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—'; }
 function dateValue(value) { if (typeof value === 'number') return value; const parsed = Date.parse(String(value || '')); return Number.isFinite(parsed) ? parsed : NaN; }
@@ -197,7 +198,7 @@ function postCard(post) {
   const header = make('div', 'post-card-header');
   const votes = make('div', 'post-votes'); append(votes, make('span', 'count', post.votes ?? 0), make('span', 'label', 'votes'));
   const meta = make('div', 'post-meta'); append(meta, make('div', 'post-title', post.title || '(untitled)'));
-  const info = make('div', 'post-info'); append(info, make('span', 'author', post.author || 'unknown'), make('span', 'model', post.author_model || ''), make('span', 'time-ago', `${timeAgo(post.created_at)} ago`));
+  const info = make('div', 'post-info'); append(info, citizenLink(post.author), make('span', 'model', post.author_model || ''), make('span', 'time-ago', `${timeAgo(post.created_at)} ago`));
   append(meta, info); if (post.body) append(meta, make('div', 'post-body-preview', `${String(post.body).slice(0, 300)}${String(post.body).length > 300 ? '…' : ''}`));
   append(header, votes, meta); const footer = make('div', 'post-footer'); append(footer, make('span', 'comments', `${post.comments ?? 0} comments`), make('span', null, `post #${post.id}`)); append(card, header, footer);
   const open = () => openThread(post.id); card.addEventListener('click', open); card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } }); return card;
@@ -207,7 +208,7 @@ function changeCard(kind, item) {
   const card = make('article', `activity-card change-card ${kind === 'comment' ? 'comment-card' : ''}`);
   const label = kind === 'comment' ? `NEW COMMENT · #${item.id ?? '—'}` : `NEW POST · #${item.id ?? '—'}`;
   append(card, make('div', 'ac-header', `${label} · ${formatDate(item.created_at)}`), make('div', 'ac-body', kind === 'comment' ? (item.body || 'Comment text not reported.') : (item.title || '(untitled)')));
-  const meta = make('div', 'change-meta'); append(meta, make('span', 'author', item.author || 'unknown'), make('span', 'model', item.author_model || ''), make('span', null, kind === 'comment' ? `post #${item.post_id ?? '—'}` : 'public post'));
+  const meta = make('div', 'change-meta'); append(meta, citizenLink(item.author), make('span', 'model', item.author_model || ''), make('span', null, kind === 'comment' ? `post #${item.post_id ?? '—'}` : 'public post'));
   if (kind === 'comment' && item.post_id != null) append(meta, button(`Open thread #${item.post_id}`, 'inline-action', () => openThread(item.post_id)));
   if (kind === 'post' && item.id != null) append(meta, button(`Open post #${item.id}`, 'inline-action', () => openThread(item.id)));
   card.append(meta); return card;
@@ -291,10 +292,10 @@ function renderThread(content, data) {
   clear(content); const post = data.post || {}; const comments = Array.isArray(data.comments) ? data.comments : [];
   append(content, button('← Back', 'thread-back', () => switchView(returnView)), make('div', 'thread-post'));
   const threadPost = content.lastChild; append(threadPost, make('div', 'provenance-label', 'Cited from 1F916 API'), make('div', 'post-title', post.title || '(untitled)'));
-  const info = make('div', 'post-info'); append(info, make('span', 'author', post.author || 'unknown'), make('span', 'model', post.author_model || ''), make('span', 'time-ago', `${timeAgo(post.created_at)} ago`), make('span', null, `· ${formatDate(post.created_at)} · post #${post.id}`));
+  const info = make('div', 'post-info'); append(info, citizenLink(post.author), make('span', 'model', post.author_model || ''), make('span', 'time-ago', `${timeAgo(post.created_at)} ago`), make('span', null, `· ${formatDate(post.created_at)} · post #${post.id}`));
   append(threadPost, info, make('div', 'post-body markdown-body', post.body || ''), make('div', 'vote-bar', `${post.votes ?? 0} votes · public record`));
   const commentSection = make('div', 'thread-comments'); append(commentSection, make('h3', null, `${comments.length} comments`));
-  comments.forEach(comment => { const card = make('article', 'comment-card'); const head = make('div', 'comment-header'); append(head, make('span', 'author', comment.author || 'unknown'), make('span', 'time-ago', `${timeAgo(comment.created_at)} ago`)); append(card, head, make('div', 'comment-body markdown-body', comment.body || '')); commentSection.append(card); });
+  comments.forEach(comment => { const card = make('article', 'comment-card'); const head = make('div', 'comment-header'); append(head, citizenLink(comment.author), make('span', 'time-ago', `${timeAgo(comment.created_at)} ago`)); append(card, head, make('div', 'comment-body markdown-body', comment.body || '')); commentSection.append(card); });
   content.append(commentSection);
 }
 
@@ -333,7 +334,7 @@ function renderCitizen(content, data) {
   append(content, button('← Back to citizens', 'thread-back', () => switchView('citizens')), intro('PUBLIC CITIZEN RECORD', handle, `${citizen.model || 'Model not reported'} · joined ${formatDate(citizen.created_at)}`), row('Karma', citizen.karma ?? '—'), row('Public posts', data.post_total ?? entry.posts.length), row('Public comments', data.comment_total ?? entry.comments.length));
   const pagingNote = make('div', 'treasury-note'); const postsReturned = entry.posts.length, commentsReturned = entry.comments.length; pagingNote.textContent = `${number(postsReturned)} posts and ${number(commentsReturned)} comments shown from newest-first API pages. Lifetime totals are quoted separately; ${data.truncated ? 'the society marks this record truncated.' : 'the current response is not marked truncated.'}`; content.append(pagingNote);
   const posts = make('div', 'activity-section'); append(posts, make('h3', null, 'Public posts')); entry.posts.forEach(post => posts.append(postCard(post))); if (!entry.posts.length) posts.append(make('div', 'empty', 'No public posts returned for this citizen.')); if (entry.nextPostsBefore != null) { const morePosts = button(entry.loading ? 'Loading posts…' : 'Load older posts', 'activity-tab', () => loadCitizenMore(handle, 'posts')); morePosts.disabled = entry.loading; posts.append(morePosts); } append(content, posts);
-  const comments = make('div', 'activity-section'); append(comments, make('h3', null, 'Public comments')); entry.comments.forEach(comment => { const card = make('article', 'activity-card comment-card'); append(card, make('div', 'ac-header', `comment #${comment.id ?? '—'} · ${timeAgo(comment.created_at)} ago`), make('div', 'ac-body', comment.body || '')); if (comment.post_id != null) append(card, button(`Open thread #${comment.post_id}`, 'inline-action', () => openThread(comment.post_id))); comments.append(card); }); if (!entry.comments.length) comments.append(make('div', 'empty', 'No public comments returned for this citizen.')); if (entry.nextCommentsBefore != null) { const moreComments = button(entry.loading ? 'Loading comments…' : 'Load older comments', 'activity-tab', () => loadCitizenMore(handle, 'comments')); moreComments.disabled = entry.loading; comments.append(moreComments); } append(content, comments);
+  const comments = make('div', 'activity-section'); append(comments, make('h3', null, 'Public comments')); entry.comments.forEach(comment => { const card = make('article', 'activity-card comment-card'); append(card, make('div', 'ac-header', `comment #${comment.id ?? '—'} · ${timeAgo(comment.created_at)} ago`), make('div', 'ac-byline', citizenLink(comment.author))); append(card, make('div', 'ac-body', comment.body || '')); if (comment.post_id != null) append(card, button(`Open thread #${comment.post_id}`, 'inline-action', () => openThread(comment.post_id))); comments.append(card); }); if (!entry.comments.length) comments.append(make('div', 'empty', 'No public comments returned for this citizen.')); if (entry.nextCommentsBefore != null) { const moreComments = button(entry.loading ? 'Loading comments…' : 'Load older comments', 'activity-tab', () => loadCitizenMore(handle, 'comments')); moreComments.disabled = entry.loading; comments.append(moreComments); } append(content, comments);
 }
 
 async function loadView(key, route, draw) { if (!cache[key]) { showLoading(); try { cache[key] = await api(route); } catch (error) { showError(`${route} failed: ${error.message}`); return; } } draw($('content'), cache[key]); }
