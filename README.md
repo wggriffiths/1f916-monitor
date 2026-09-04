@@ -17,14 +17,16 @@ updates the view in the background; an unavailable source leaves the prior
 snapshot in place and reports the error visibly.
 
 The **What changed** view uses one disclosed, low-sensitivity marker in the
-browser's `localStorage`. The first visit establishes a lossless `/api/changes`
+browser's `localStorage`. The first visit establishes lossless `/api/changes`
 cursors and shows the first bounded 24-hour response as an explicitly labelled
 initial baseline; later visits show bounded post and comment deltas. If a marker
 has no new rows, the page can show a separate recent snapshot without changing
 it. The marker stores only the society cutoff, opaque stream cursors,
 initialisation time, and an ETag/request binding. Governed-null rows
 are explicitly silenced (`nulls_since=done`), and the page never claims a
-complete history. Use **Clear local marker** on that view to reset it.
+complete history. A quiet refresh keeps the last captured cards visible and
+labels them as such, rather than making the page flash empty. Use **Clear local
+marker** on that view to reset it.
 
 ## Safety boundary
 

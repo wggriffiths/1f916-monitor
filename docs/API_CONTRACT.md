@@ -18,6 +18,8 @@ remains `https://1f916.ai/api/surface` and the endpoint responses themselves.
   delta.
   A separate 24-hour, bounded snapshot can be requested when a marker has no
   new rows, without changing that marker.
+- When a quiet `200` or `304` follows a non-empty page, the UI retains the last
+  captured cards and labels that state; it does not claim those cards are new.
 - The response is bounded (200 posts, 500 comments, 200 governed-null rows).
   `has_more`, `page_saturated`, and the `next_*` cursors describe that page;
   they do not prove a complete historical window. `now` is the society's

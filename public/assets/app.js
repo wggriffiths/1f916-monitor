@@ -233,17 +233,21 @@ async function loadChanges(options = {}) {
   changesRequest = (async () => {
     try {
       const result = await changesFetch(params, etag);
-      if (result.notModified) { cache.changes = {...(cache.changes || {}), notModified: true, baseline: false}; if (currentView === 'changes') renderChanges($('content')); return; }
+      if (result.notModified) { cache.changes = {...(cache.changes || {}), notModified: true, quiet: true, baseline: false}; if (currentView === 'changes') renderChanges($('content')); return; }
       const data = result.data;
       const incomingPosts = Array.isArray(data.posts) ? data.posts : [];
       const incomingComments = Array.isArray(data.comments) ? data.comments : [];
-      if (options.append && cache.changes && !cache.changes.baseline) {
+      const preserveLastPage = !preview && !options.append && cache.changes && !cache.changes.preview && (cache.changes.posts?.length || cache.changes.comments?.length) && !incomingPosts.length && !incomingComments.length;
+      if (preserveLastPage) {
+        cache.changes.data = data; cache.changes.notModified = false; cache.changes.quiet = true; cache.changes.baseline = false;
+      } else if (options.append && cache.changes && !cache.changes.preview) {
         cache.changes.posts = mergeById(cache.changes.posts || [], incomingPosts);
         cache.changes.comments = mergeById(cache.changes.comments || [], incomingComments);
-        cache.changes.data = data; cache.changes.notModified = false;
+        cache.changes.data = data; cache.changes.notModified = false; cache.changes.quiet = false;
       } else {
-        cache.changes = { data, posts: incomingPosts, comments: incomingComments, baseline, preview, notModified: false, pages: 1 };
+        cache.changes = { data, posts: incomingPosts, comments: incomingComments, baseline, preview, notModified: false, quiet: false, lastRecordsAt: incomingPosts.length || incomingComments.length ? data.now : null, pages: 1 };
       }
+      if (!preserveLastPage && cache.changes && (incomingPosts.length || incomingComments.length)) cache.changes.lastRecordsAt = data.now;
       if (!preview) {
         const marker = changesMarkerFromResponse(previous, data, result.requestKey, result.etag);
         changesState = marker; writeChangesMarker(marker);
@@ -266,8 +270,9 @@ function renderChanges(content) {
   const controls = make('div', 'change-controls'); append(controls, button('Clear local marker', 'inline-action', clearChangesMarker), make('span', 'treasury-note', data.now ? `Society capture: ${formatDate(data.now)}` : 'Society capture time not reported.')); content.append(controls);
   if (cache.changes.preview) append(content, make('div', 'empty', 'Recent 24-hour best-effort bounded snapshot only; your lossless visit marker was not changed.'));
   else if (cache.changes.baseline) append(content, make('div', 'empty', `Marker initialized ${formatDate(changesState?.initialized_at)}. These records are an initial baseline, not a prior-visit comparison; later visits will show only new deltas.`));
+  else if (cache.changes.quiet) append(content, make('div', 'empty', cache.changes.notModified ? 'No new changes since the last lossless cursor; showing the last captured page.' : `No new changes at ${formatDate(data.now)}; showing the last non-empty page captured at ${formatDate(cache.changes.lastRecordsAt)}.`));
   const posts = cache.changes.posts || [], comments = cache.changes.comments || [];
-  if (cache.changes.notModified) { append(content, make('div', 'empty', 'No new changes since the last lossless cursor.')); if (!posts.length && !comments.length) { const recent = button('Show latest bounded activity', 'activity-tab', () => { recent.disabled = true; loadChanges({preview: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', recent)); return; } }
+  if (cache.changes.notModified && !posts.length && !comments.length) { const recent = button('Show latest bounded activity', 'activity-tab', () => { recent.disabled = true; loadChanges({preview: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', recent)); return; }
   if (!posts.length && !comments.length && !cache.changes.preview) { const recent = button('Show latest bounded activity', 'activity-tab', () => { recent.disabled = true; loadChanges({preview: true}).finally(() => { if (currentView === 'changes') renderChanges($('content')); }); }); append(content, make('div', 'change-more', recent)); }
   const list = make('div', 'activity-section'); append(list, make('h3', null, `Posts · ${posts.length}`)); posts.forEach(item => list.append(changeCard('post', item))); if (!posts.length) list.append(make('div', 'empty', 'No new posts in this bounded page.'));
   const commentList = make('div', 'activity-section'); append(commentList, make('h3', null, `Comments · ${comments.length}`)); comments.forEach(item => commentList.append(changeCard('comment', item))); if (!comments.length) commentList.append(make('div', 'empty', 'No new comments in this bounded page.'));
