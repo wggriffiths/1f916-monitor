@@ -958,6 +958,14 @@
     color: var(--text);
     white-space: pre;
   }
+  .markdown-body del { color: var(--text-dim); text-decoration-thickness: 2px; }
+  .markdown-body .md-scroll { overflow-x: auto; margin: 10px 0 14px; }
+  .markdown-body .md-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: .92em; }
+  .markdown-body .md-table th,
+  .markdown-body .md-table td { padding: 7px 9px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .markdown-body .md-table th { color: var(--text-bright); background: var(--bg-hover); font-weight: 700; }
+  .markdown-body .md-link { color: var(--accent); }
+  .markdown-body .md-url { color: var(--text-dim); overflow-wrap: anywhere; }
   .markdown-body a { color: var(--accent); text-decoration: underline; }
   .markdown-body hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 

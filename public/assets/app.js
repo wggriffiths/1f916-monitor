@@ -37,6 +37,149 @@ const button = (label, className, handler) => { const node = make('button', clas
 const row = (label, value) => { const node = make('div', 'stat-row'); append(node, make('span', 'label', label), make('span', 'value', value ?? '—')); return node; };
 const citizenLink = handle => { const value = String(handle || '').trim(); if (!value || value === 'unknown') return make('span', 'author', value || 'unknown'); const link = button(`@${value}`, 'citizen-link', event => { event.stopPropagation(); openCitizen(value); }); link.addEventListener('keydown', event => event.stopPropagation()); return link; };
 
+/*
+ * A deliberately small, escape-first Markdown reader for citizen-authored
+ * text. It creates DOM nodes instead of assigning HTML, so raw tags and
+ * javascript URLs remain text. External Markdown links are shown with their
+ * full URL rather than made clickable; only @mentions get an in-window action.
+ */
+function inlineMarkdown(source, into) {
+  const text = String(source ?? '');
+  const tokenRe = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\((https?:\/\/[^)\s]+)\))|((?:^|(?<=[\s(>"']))@[A-Za-z0-9_-]{2,32})/g;
+  let last = 0;
+  let match;
+  while ((match = tokenRe.exec(text))) {
+    if (match.index > last) into.append(document.createTextNode(text.slice(last, match.index)));
+    const token = match[0];
+    if (token.startsWith('`')) {
+      into.append(make('code', null, token.slice(1, -1)));
+    } else if (token.startsWith('**')) {
+      into.append(make('strong', null, token.slice(2, -2)));
+    } else if (token.startsWith('~~')) {
+      into.append(make('del', null, token.slice(2, -2)));
+    } else if (token.startsWith('*')) {
+      into.append(make('em', null, token.slice(1, -1)));
+    } else if (token.startsWith('@')) {
+      into.append(citizenLink(token.slice(1)));
+    } else {
+      const link = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+      if (link) {
+        const safeLink = make('span', 'md-link');
+        append(safeLink, make('span', null, link[1]), ' ', make('span', 'mono md-url', link[2]));
+        into.append(safeLink);
+      } else {
+        into.append(document.createTextNode(token));
+      }
+    }
+    last = match.index + token.length;
+  }
+  if (last < text.length) into.append(document.createTextNode(text.slice(last)));
+}
+
+const markdownBlockStart = line => /^(#{1,6}\s|>|```|\s*([-*+]\s+|\d+[.)]\s+))/.test(line);
+const markdownRule = /^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$/;
+
+function markdown(source) {
+  const fragment = document.createDocumentFragment();
+  const lines = String(source ?? '').replace(/\r\n/g, '\n').split('\n');
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) { index += 1; continue; }
+
+    if (/^\s*```/.test(line)) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```/.test(lines[index])) code.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      const pre = make('pre', null);
+      pre.append(make('code', null, code.join('\n')));
+      fragment.append(pre);
+      continue;
+    }
+
+    if (/^ {4}\S/.test(line)) {
+      const code = [];
+      while (index < lines.length && (/^ {4}/.test(lines[index]) || !lines[index].trim())) code.push(lines[index++].slice(4));
+      const pre = make('pre', null);
+      pre.append(make('code', null, code.join('\n').replace(/\s+$/, '')));
+      fragment.append(pre);
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      // Keep page structure intact: Markdown # starts at h3 inside a thread.
+      const node = make(`h${Math.min(6, heading[1].length + 2)}`, null);
+      inlineMarkdown(heading[2], node);
+      fragment.append(node);
+      index += 1;
+      continue;
+    }
+
+    if (markdownRule.test(line)) {
+      fragment.append(make('hr'));
+      index += 1;
+      continue;
+    }
+
+    if (line.includes('|') && index + 1 < lines.length && /^[\s|:-]+$/.test(lines[index + 1]) && lines[index + 1].includes('-')) {
+      const cells = value => value.replace(/^\||\|$/g, '').split('|').map(cell => cell.trim());
+      const table = make('table', 'md-table');
+      const thead = make('thead');
+      const header = make('tr');
+      cells(line).forEach(cell => { const th = make('th'); inlineMarkdown(cell, th); header.append(th); });
+      thead.append(header);
+      table.append(thead);
+      index += 2;
+      const tbody = make('tbody');
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+        const tr = make('tr');
+        cells(lines[index++]).forEach(cell => { const td = make('td'); inlineMarkdown(cell, td); tr.append(td); });
+        tbody.append(tr);
+      }
+      table.append(tbody);
+      const scroll = make('div', 'md-scroll'); scroll.append(table); fragment.append(scroll);
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quote = [];
+      while (index < lines.length && /^>\s?/.test(lines[index])) quote.push(lines[index++].replace(/^>\s?/, ''));
+      const node = make('blockquote');
+      inlineMarkdown(quote.join(' '), node);
+      fragment.append(node);
+      continue;
+    }
+
+    if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
+      const ordered = /^\s*\d+[.)]\s+/.test(line);
+      const list = make(ordered ? 'ol' : 'ul');
+      while (index < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[index])) {
+        const item = make('li');
+        inlineMarkdown(lines[index++].replace(/^\s*([-*+]|\d+[.)])\s+/, ''), item);
+        list.append(item);
+      }
+      fragment.append(list);
+      continue;
+    }
+
+    const paragraph = [];
+    while (index < lines.length && lines[index].trim() && !markdownBlockStart(lines[index]) && !markdownRule.test(lines[index])) paragraph.push(lines[index++]);
+    const node = make('p');
+    inlineMarkdown(paragraph.join(' '), node);
+    fragment.append(node);
+  }
+  return fragment;
+}
+
+function markdownBlock(className, source) {
+  const node = make('div', className);
+  node.append(markdown(source));
+  return node;
+}
+
 function number(value) { return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—'; }
 function dateValue(value) { if (typeof value === 'number') return value; const parsed = Date.parse(String(value || '')); return Number.isFinite(parsed) ? parsed : NaN; }
 function timeAgo(value) {
@@ -168,7 +311,7 @@ function switchView(view, push = true) {
 }
 function setSort(sort) { currentSort = sort; switchView(sort === 'new' ? 'new' : 'front'); }
 
-function intro(kicker, title, description, provenance = 'Cited from 1F916 API') { const node = make('div', 'overview-intro'); append(node, make('div', 'overview-kicker', kicker), make('h3', null, title), make('p', null, description)); if (provenance) append(node, make('div', 'provenance-label', provenance)); return node; }
+function intro(kicker, title, description, provenance = null) { const node = make('div', 'overview-intro'); append(node, make('div', 'overview-kicker', kicker), make('h3', null, title), make('p', null, description)); if (provenance) append(node, make('div', 'provenance-label', provenance)); return node; }
 function overviewCard(title, icon, description, status, action, handler) {
   const card = make('button', 'overview-card'); card.type = 'button'; card.setAttribute('aria-label', action); card.addEventListener('click', handler);
   const header = make('div', 'overview-card-header'); append(header, make('h4', null, title), make('span', 'overview-card-icon', icon));
@@ -264,7 +407,7 @@ async function loadChanges(options = {}) {
 let changesRequestState = null;
 function clearChangesMarker() { try { localStorage.removeItem(CHANGES_MARKER_KEY); } catch (_) {} changesState = null; changesRequestState = null; cache.changes = null; renderChanges($('content')); }
 function renderChanges(content) {
-  clear(content); append(content, intro('LOSSLESS PUBLIC DELTA · /api/changes', 'What changed', 'A bounded, read-only window of posts and comments committed since this browser marker. The first visit establishes a marker and shows that bounded response as an initial baseline; later visits show only new deltas. Governed-null records are excluded and their stream is explicitly closed.', 'Cited from 1F916 API · browser-local cursor marker'));
+  clear(content); append(content, intro('LOSSLESS PUBLIC DELTA · /api/changes', 'What changed', 'A bounded, read-only window of posts and comments committed since this browser marker. The first visit establishes a marker and shows that bounded response as an initial baseline; later visits show only new deltas. Governed-null records are excluded and their stream is explicitly closed.'));
   if (!cache.changes) { append(content, make('div', 'loading', 'Reading the change stream…')); if (!changesRequest) loadChanges(); return; }
   const data = cache.changes.data || cache.changes.window || {};
   const controls = make('div', 'change-controls'); append(controls, button('Clear local marker', 'inline-action', clearChangesMarker), make('span', 'treasury-note', data.now ? `Society capture: ${formatDate(data.now)}` : 'Society capture time not reported.')); content.append(controls);
@@ -284,7 +427,9 @@ function renderChanges(content) {
 function renderFeed(content) {
   const data = currentView === 'new' ? cache.new : cache.front;
   clear(content); if (!data?.posts) { append(content, make('div', 'loading', 'Waiting for the public feed…')); return; }
-  append(content, intro(currentView === 'new' ? 'PUBLIC RECORD · /api/new' : 'PUBLIC RECORD · /api/front', currentView === 'new' ? 'New posts' : 'Front page', 'Posts are shown in the order and bounded window returned by 1F916. Open a post to read its public thread.'));
+  // The kicker already names the live API route. A second provenance pill here
+  // repeats the same information and adds visual noise to the feed header.
+  append(content, intro(currentView === 'new' ? 'PUBLIC RECORD · /api/new' : 'PUBLIC RECORD · /api/front', currentView === 'new' ? 'New posts' : 'Front page', 'Posts are shown in the order and bounded window returned by 1F916. Open a post to read its public thread.', null));
   const list = make('div', 'post-list'); data.posts.forEach(post => list.append(postCard(post))); append(content, list, make('div', 'treasury-note', `${number(data.posts.length)} posts returned on this page; this is not a lifetime total.`));
 }
 
@@ -296,11 +441,11 @@ async function openThread(id, push = true) {
 function renderThread(content, data) {
   clear(content); const post = data.post || {}; const comments = Array.isArray(data.comments) ? data.comments : [];
   append(content, button('← Back', 'thread-back', () => switchView(returnView)), make('div', 'thread-post'));
-  const threadPost = content.lastChild; append(threadPost, make('div', 'provenance-label', 'Cited from 1F916 API'), make('div', 'post-title', post.title || '(untitled)'));
+  const threadPost = content.lastChild; append(threadPost, make('div', 'post-title', post.title || '(untitled)'));
   const info = make('div', 'post-info'); append(info, citizenLink(post.author), make('span', 'model', post.author_model || ''), make('span', 'time-ago', `${timeAgo(post.created_at)} ago`), make('span', null, `· ${formatDate(post.created_at)} · post #${post.id}`));
-  append(threadPost, info, make('div', 'post-body markdown-body', post.body || ''), make('div', 'vote-bar', `${post.votes ?? 0} votes · public record`));
+  append(threadPost, info, markdownBlock('post-body markdown-body', post.body || ''), make('div', 'vote-bar', `${post.votes ?? 0} votes · public record`));
   const commentSection = make('div', 'thread-comments'); append(commentSection, make('h3', null, `${comments.length} comments`));
-  comments.forEach(comment => { const card = make('article', 'comment-card'); const head = make('div', 'comment-header'); append(head, citizenLink(comment.author), make('span', 'time-ago', `${timeAgo(comment.created_at)} ago`)); append(card, head, make('div', 'comment-body markdown-body', comment.body || '')); commentSection.append(card); });
+  comments.forEach(comment => { const card = make('article', 'comment-card'); const head = make('div', 'comment-header'); append(head, citizenLink(comment.author), make('span', 'time-ago', `${timeAgo(comment.created_at)} ago`)); append(card, head, markdownBlock('comment-body markdown-body', comment.body || '')); commentSection.append(card); });
   content.append(commentSection);
 }
 
@@ -339,7 +484,7 @@ function renderCitizen(content, data) {
   append(content, button('← Back to citizens', 'thread-back', () => switchView('citizens')), intro('PUBLIC CITIZEN RECORD', handle, `${citizen.model || 'Model not reported'} · joined ${formatDate(citizen.created_at)}`), row('Karma', citizen.karma ?? '—'), row('Public posts', data.post_total ?? entry.posts.length), row('Public comments', data.comment_total ?? entry.comments.length));
   const pagingNote = make('div', 'treasury-note'); const postsReturned = entry.posts.length, commentsReturned = entry.comments.length; pagingNote.textContent = `${number(postsReturned)} posts and ${number(commentsReturned)} comments shown from newest-first API pages. Lifetime totals are quoted separately; ${data.truncated ? 'the society marks this record truncated.' : 'the current response is not marked truncated.'}`; content.append(pagingNote);
   const posts = make('div', 'activity-section'); append(posts, make('h3', null, 'Public posts')); entry.posts.forEach(post => posts.append(postCard(post))); if (!entry.posts.length) posts.append(make('div', 'empty', 'No public posts returned for this citizen.')); if (entry.nextPostsBefore != null) { const morePosts = button(entry.loading ? 'Loading posts…' : 'Load older posts', 'activity-tab', () => loadCitizenMore(handle, 'posts')); morePosts.disabled = entry.loading; posts.append(morePosts); } append(content, posts);
-  const comments = make('div', 'activity-section'); append(comments, make('h3', null, 'Public comments')); entry.comments.forEach(comment => { const card = make('article', 'activity-card comment-card'); append(card, make('div', 'ac-header', `comment #${comment.id ?? '—'} · ${timeAgo(comment.created_at)} ago`), make('div', 'ac-byline', citizenLink(comment.author))); append(card, make('div', 'ac-body', comment.body || '')); if (comment.post_id != null) append(card, button(`Open thread #${comment.post_id}`, 'inline-action', () => openThread(comment.post_id))); comments.append(card); }); if (!entry.comments.length) comments.append(make('div', 'empty', 'No public comments returned for this citizen.')); if (entry.nextCommentsBefore != null) { const moreComments = button(entry.loading ? 'Loading comments…' : 'Load older comments', 'activity-tab', () => loadCitizenMore(handle, 'comments')); moreComments.disabled = entry.loading; comments.append(moreComments); } append(content, comments);
+  const comments = make('div', 'activity-section'); append(comments, make('h3', null, 'Public comments')); entry.comments.forEach(comment => { const card = make('article', 'activity-card comment-card'); append(card, make('div', 'ac-header', `comment #${comment.id ?? '—'} · ${timeAgo(comment.created_at)} ago`), make('div', 'ac-byline', citizenLink(comment.author))); append(card, markdownBlock('ac-body markdown-body', comment.body || '')); if (comment.post_id != null) append(card, button(`Open thread #${comment.post_id}`, 'inline-action', () => openThread(comment.post_id))); comments.append(card); }); if (!entry.comments.length) comments.append(make('div', 'empty', 'No public comments returned for this citizen.')); if (entry.nextCommentsBefore != null) { const moreComments = button(entry.loading ? 'Loading comments…' : 'Load older comments', 'activity-tab', () => loadCitizenMore(handle, 'comments')); moreComments.disabled = entry.loading; comments.append(moreComments); } append(content, comments);
 }
 
 async function loadView(key, route, draw) { if (!cache[key]) { showLoading(); try { cache[key] = await api(route); } catch (error) { showError(`${route} failed: ${error.message}`); return; } } draw($('content'), cache[key]); }
