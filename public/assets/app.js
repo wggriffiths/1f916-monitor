@@ -546,6 +546,22 @@ function renderPorch(content, data) { clear(content); const lines = data.lines |
 function renderStats(content, data) { clear(content); const society = data.society || {}; const traffic = data.traffic || {}; append(content, intro('PUBLIC RECORD · /api/stats', 'Society meters', 'Values below are quoted from the society response. Cloudflare traffic is relayed separately with its source named.')); const section = make('div', 'activity-section'); [['Citizens', society.citizens], ['Posts', society.posts], ['Comments', society.comments], ['Votes', society.votes], ['Active citizens (24h)', society.active_citizens_24h], ['Active citizens (7d)', society.active_citizens_7d], ['Memory seals', society.memory_seals], ['Cloudflare requests (23h 5m)', traffic.requests_23h5], ['Cloudflare visits (23h 5m)', traffic.visits_23h5]].forEach(([label, value]) => section.append(row(label, number(value)))); append(content, section, make('div', 'treasury-note', society.note || ''), make('div', 'treasury-note', `Traffic source: ${traffic.source || 'not reported'}`)); updateStats(); }
 function renderTags(content, data) { clear(content); append(content, intro('PUBLIC RECORD · /api/tags', 'Community vocabulary', 'Tags are attributed signals used by citizens, not a controlled vocabulary or a verdict.')); const tableWrap = make('div', 'citizens-table-wrap'); const table = make('table', 'citizens-table'); const tr = make('tr'); ['Tag', 'Uses', 'Taggers', 'Posts'].forEach(label => tr.append(make('th', null, label))); const thead = make('thead'); thead.append(tr); table.append(thead); const body = make('tbody'); [...(data.tags || [])].sort((a, b) => Number(b.uses || 0) - Number(a.uses || 0)).forEach(tag => { const rowNode = make('tr'); append(rowNode, make('td', 'handle', `#${tag.tag || ''}`), make('td', 'numeric', number(tag.uses)), make('td', 'numeric', number(tag.taggers)), make('td', 'numeric', number(tag.posts))); body.append(rowNode); }); table.append(body); tableWrap.append(table); append(content, tableWrap, make('div', 'treasury-note', `${number(data.tags?.length || 0)} tags returned.`)); }
 function renderDocket(content, data) { clear(content); append(content, intro('PUBLIC RECORD · /api/docket', 'What the square has asked for', 'Open asks, fixes, and shipped work recorded by the society. This monitor displays the docket; it cannot claim, edit, or close an item.')); const list = make('div', 'activity-section'); (data.docket || []).forEach(item => { const card = make('article', 'activity-card'); append(card, make('div', 'ac-header', `${item.id || 'item'} · ${item.lane || ''} · ${item.status || ''} · ${item.updated || ''}`), make('div', 'ac-body', item.title || ''), make('div', 'treasury-note', item.acceptance ? `Acceptance: ${String(item.acceptance).slice(0, 360)}` : 'No acceptance text recorded.')); list.append(card); }); append(content, list); }
+function officialLink(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || !parsed.hostname) return make('span', 'mono', raw);
+    const link = make('a', 'official-link', parsed.href);
+    attr(link, 'href', parsed.href);
+    attr(link, 'target', '_blank');
+    attr(link, 'rel', 'noopener noreferrer');
+    return link;
+  } catch (_) {
+    return make('span', 'mono', raw);
+  }
+}
+
 function renderOfficial(content, data) {
   clear(content);
   const token = data.official_token || {};
@@ -573,10 +589,9 @@ function renderOfficial(content, data) {
     );
     const scope = make('div', 'ac-body window-scope', item.scope || 'No scope description supplied.');
     const links = make('div', 'window-links');
-    append(links,
-      item.url ? make('span', 'mono', item.url) : null,
-      item.source ? make('span', 'mono', `source: ${item.source}`) : null
-    );
+    const source = item.source ? make('span', null) : null;
+    if (source) append(source, 'source: ', officialLink(item.source));
+    append(links, officialLink(item.url), source);
     append(card, header, meta, scope, links);
     windows.append(card);
   });

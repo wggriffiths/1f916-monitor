@@ -1648,6 +1648,8 @@
   .window-meta { margin-top: 6px; }
   .window-scope { max-width: 100ch; }
   .window-links { margin-top: 10px; overflow-wrap: anywhere; }
+  .official-link { color: var(--accent); text-decoration: underline; overflow-wrap: anywhere; }
+  .official-link:hover { color: var(--text-bright); }
 
   .activity-card.comment-card { border-left: 2px solid var(--purple); }
   .activity-card.post-card-act { border-left: 2px solid var(--green); }
