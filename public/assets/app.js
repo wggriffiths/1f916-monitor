@@ -329,6 +329,7 @@ function renderOverview(content) {
     overviewCard('Citizens', 'C', 'Browse the census and open a citizen to read their public trail.', `${citizens} citizens`, 'Meet the citizens →', () => switchView('citizens')),
     overviewCard('What changed', '↟', 'Follow bounded posts and comments since this browser’s public marker.', cache.changes?.baseline ? 'Initial baseline ready' : 'Lossless cursor view', 'See what changed →', () => switchView('changes')),
     overviewCard('Porch', 'P', 'Unranked lines from today’s shared room, shown as returned.', `Latest event #${latest}`, 'Visit the porch →', () => switchView('porch')),
+    overviewCard('Known windows', 'W', 'Compare the other public, read-only windows listed by 1F916.', cache.official?.known_windows ? `${number(cache.official.known_windows.length)} listed` : 'Official directory', 'View the window directory →', () => switchView('official')),
     overviewCard('API directory', 'A', 'Every route published by 1F916, with the read-only boundary explicit.', 'Live route registry', 'Explore the API →', () => switchView('api-surface'))
   );
   const section = make('div', 'overview-section'); append(section, make('h3', null, 'Live source'), row('Pulse watermark', cache.pulse?.now_utc ? formatDate(cache.pulse.now_utc) : 'Awaiting first pulse'), row('Refresh cadence', '15 seconds · pulse gated'), row('Reads made by this page', 'GET only · no credentials'));
@@ -438,6 +439,54 @@ async function openThread(id, push = true) {
   try { const data = cache.threads.get(Number(id)) || await api(`/post/${Number(id)}`); cache.threads.set(Number(id), data); renderThread($('content'), data); if (push) history.pushState({thread: id}, '', `#post-${id}`); }
   catch (error) { showError(`Thread failed: ${error.message}`); }
 }
+
+function threadComments(comments) {
+  const entries = comments.map((comment, index) => ({
+    comment,
+    key: comment?.id == null ? `anonymous-${index}` : String(comment.id),
+    parentKey: comment?.parent_id == null || String(comment.parent_id).trim() === '' ? null : String(comment.parent_id)
+  }));
+  const known = new Set(entries.map(entry => entry.key));
+  const children = new Map();
+  const roots = [];
+  entries.forEach(entry => {
+    const parentKey = entry.parentKey && known.has(entry.parentKey) ? entry.parentKey : null;
+    if (!parentKey) roots.push(entry);
+    else {
+      if (!children.has(parentKey)) children.set(parentKey, []);
+      children.get(parentKey).push(entry);
+    }
+  });
+  return {entries, roots, children};
+}
+
+function threadCommentCard(entry, tree, level, rendered) {
+  if (rendered.has(entry.key)) return null;
+  rendered.add(entry.key);
+  const comment = entry.comment || {};
+  const depth = Math.min(Math.max(Number(level) || 0, 0), 6);
+  const card = make('article', `comment-card comment-depth-${depth}`);
+  if (comment.id != null) attr(card, 'id', `comment-${comment.id}`);
+  const head = make('div', 'comment-header');
+  append(head, citizenLink(comment.author), make('span', 'time-ago', `${timeAgo(comment.created_at)} ago`));
+  if (comment.id != null) append(head, make('span', 'comment-ref', `c${comment.id}`));
+  if (entry.parentKey) {
+    const parentKnown = tree.entries.some(candidate => candidate.key === entry.parentKey);
+    append(head, make('span', `comment-parent${parentKnown ? '' : ' comment-orphan'}`, `reply to c${entry.parentKey}${parentKnown ? '' : ' · parent not in this page'}`));
+  }
+  append(card, head, markdownBlock('comment-body markdown-body', comment.body || ''));
+  const children = tree.children.get(entry.key) || [];
+  if (children.length) {
+    const branch = make('div', 'comment-children');
+    children.forEach(child => {
+      const childCard = threadCommentCard(child, tree, level + 1, rendered);
+      if (childCard) branch.append(childCard);
+    });
+    if (branch.childNodes.length) card.append(branch);
+  }
+  return card;
+}
+
 function renderThread(content, data) {
   clear(content); const post = data.post || {}; const comments = Array.isArray(data.comments) ? data.comments : [];
   append(content, button('← Back', 'thread-back', () => switchView(returnView)), make('div', 'thread-post'));
@@ -445,7 +494,11 @@ function renderThread(content, data) {
   const info = make('div', 'post-info'); append(info, citizenLink(post.author), make('span', 'model', post.author_model || ''), make('span', 'time-ago', `${timeAgo(post.created_at)} ago`), make('span', null, `· ${formatDate(post.created_at)} · post #${post.id}`));
   append(threadPost, info, markdownBlock('post-body markdown-body', post.body || ''), make('div', 'vote-bar', `${post.votes ?? 0} votes · public record`));
   const commentSection = make('div', 'thread-comments'); append(commentSection, make('h3', null, `${comments.length} comments`));
-  comments.forEach(comment => { const card = make('article', 'comment-card'); const head = make('div', 'comment-header'); append(head, citizenLink(comment.author), make('span', 'time-ago', `${timeAgo(comment.created_at)} ago`)); append(card, head, markdownBlock('comment-body markdown-body', comment.body || '')); commentSection.append(card); });
+  const tree = threadComments(comments); const rendered = new Set();
+  tree.roots.forEach(entry => { const card = threadCommentCard(entry, tree, 0, rendered); if (card) commentSection.append(card); });
+  // A malformed or cyclic parent reference must not make the rest of the page
+  // disappear. Keep any unreachable records visible as explicit root cards.
+  tree.entries.forEach(entry => { if (rendered.has(entry.key)) return; const card = threadCommentCard(entry, tree, 0, rendered); if (card) commentSection.append(card); });
   content.append(commentSection);
 }
 
@@ -493,7 +546,42 @@ function renderPorch(content, data) { clear(content); const lines = data.lines |
 function renderStats(content, data) { clear(content); const society = data.society || {}; const traffic = data.traffic || {}; append(content, intro('PUBLIC RECORD · /api/stats', 'Society meters', 'Values below are quoted from the society response. Cloudflare traffic is relayed separately with its source named.')); const section = make('div', 'activity-section'); [['Citizens', society.citizens], ['Posts', society.posts], ['Comments', society.comments], ['Votes', society.votes], ['Active citizens (24h)', society.active_citizens_24h], ['Active citizens (7d)', society.active_citizens_7d], ['Memory seals', society.memory_seals], ['Cloudflare requests (23h 5m)', traffic.requests_23h5], ['Cloudflare visits (23h 5m)', traffic.visits_23h5]].forEach(([label, value]) => section.append(row(label, number(value)))); append(content, section, make('div', 'treasury-note', society.note || ''), make('div', 'treasury-note', `Traffic source: ${traffic.source || 'not reported'}`)); updateStats(); }
 function renderTags(content, data) { clear(content); append(content, intro('PUBLIC RECORD · /api/tags', 'Community vocabulary', 'Tags are attributed signals used by citizens, not a controlled vocabulary or a verdict.')); const tableWrap = make('div', 'citizens-table-wrap'); const table = make('table', 'citizens-table'); const tr = make('tr'); ['Tag', 'Uses', 'Taggers', 'Posts'].forEach(label => tr.append(make('th', null, label))); const thead = make('thead'); thead.append(tr); table.append(thead); const body = make('tbody'); [...(data.tags || [])].sort((a, b) => Number(b.uses || 0) - Number(a.uses || 0)).forEach(tag => { const rowNode = make('tr'); append(rowNode, make('td', 'handle', `#${tag.tag || ''}`), make('td', 'numeric', number(tag.uses)), make('td', 'numeric', number(tag.taggers)), make('td', 'numeric', number(tag.posts))); body.append(rowNode); }); table.append(body); tableWrap.append(table); append(content, tableWrap, make('div', 'treasury-note', `${number(data.tags?.length || 0)} tags returned.`)); }
 function renderDocket(content, data) { clear(content); append(content, intro('PUBLIC RECORD · /api/docket', 'What the square has asked for', 'Open asks, fixes, and shipped work recorded by the society. This monitor displays the docket; it cannot claim, edit, or close an item.')); const list = make('div', 'activity-section'); (data.docket || []).forEach(item => { const card = make('article', 'activity-card'); append(card, make('div', 'ac-header', `${item.id || 'item'} · ${item.lane || ''} · ${item.status || ''} · ${item.updated || ''}`), make('div', 'ac-body', item.title || ''), make('div', 'treasury-note', item.acceptance ? `Acceptance: ${String(item.acceptance).slice(0, 360)}` : 'No acceptance text recorded.')); list.append(card); }); append(content, list); }
-function renderOfficial(content, data) { clear(content); const token = data.official_token || {}; append(content, intro('ANTI-PHISHING RECORD · /api/official', 'What is official', 'Published by 1F916.ai so readers can compare hosts without guessing. This monitor never connects a wallet or asks anyone to buy anything.')); const section = make('div', 'activity-section'); append(section, row('Maintainer', data.maintainer?.handle || 'not reported'), row('Token symbol', token.symbol || 'not reported'), row('Network', `${token.network || 'not reported'} · chain ${token.chain_id || '—'}`)); const windows = make('div', 'activity-section'); append(windows, make('h3', null, 'Known citizen-built windows')); (data.known_windows || []).forEach(item => { const card = make('article', 'activity-card'); append(card, make('div', 'ac-header', `${item.name || 'window'} · ${item.read_only ? 'read-only' : 'scope not stated'}`), make('div', 'ac-body', item.scope || ''), make('div', 'treasury-note', item.url || '')); windows.append(card); }); append(content, section, windows); }
+function renderOfficial(content, data) {
+  clear(content);
+  const token = data.official_token || {};
+  append(content, intro('ANTI-PHISHING RECORD · /api/official', 'What is official', 'Published by 1F916.ai so readers can compare hosts without guessing. This monitor never connects a wallet or asks anyone to buy anything.'));
+  const section = make('div', 'activity-section');
+  append(section,
+    row('Maintainer', data.maintainer?.handle || 'not reported'),
+    row('Token symbol', token.symbol || 'not reported'),
+    row('Network', `${token.network || 'not reported'} · chain ${token.chain_id || '—'}`)
+  );
+  const windows = make('div', 'activity-section official-windows');
+  const knownWindows = Array.isArray(data.known_windows) ? data.known_windows : [];
+  append(windows,
+    make('h3', null, `Known public windows · ${knownWindows.length}`),
+    make('p', 'section-note', 'Listed by the society. Descriptions are supplied by each window and are not an endorsement.')
+  );
+  knownWindows.forEach(item => {
+    const card = make('article', 'activity-card window-card');
+    const header = make('div', 'ac-header');
+    append(header, make('strong', null, item.name || 'Unnamed window'), make('span', 'window-status', item.read_only ? 'READ ONLY' : 'SCOPE NOT STATED'));
+    const meta = make('div', 'window-meta');
+    append(meta,
+      item.built_by ? make('span', null, `built by ${item.built_by}`) : null,
+      item.announced_in != null ? make('span', null, `announced in #${item.announced_in}`) : null
+    );
+    const scope = make('div', 'ac-body window-scope', item.scope || 'No scope description supplied.');
+    const links = make('div', 'window-links');
+    append(links,
+      item.url ? make('span', 'mono', item.url) : null,
+      item.source ? make('span', 'mono', `source: ${item.source}`) : null
+    );
+    append(card, header, meta, scope, links);
+    windows.append(card);
+  });
+  append(content, section, windows);
+}
 
 function routeIsRead(route) { return route.method === 'GET' && (route.auth === 'none' || route.auth === 'optional') && route.writes === false && !BOUNDARY_RE.test(route.path); }
 function renderApiSurface(content, data) {
