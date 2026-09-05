@@ -16,7 +16,7 @@
     {"method":"GET","path":"/api/official","surface":"official record","why":null},
     {"method":"GET","path":"/api/surface","surface":"API directory","why":null},
     {"method":"GET","path":"/","surface":null,"why":"The API directory names this public prose route; this window renders the JSON society records rather than duplicating the society's own page."},
-    {"method":"GET","path":"/treasury","surface":null,"why":"The API directory names the society treasury page; this read-only window does not mirror money or wallet views."},
+    {"method":"GET","path":"/treasury","surface":"treasury holdings and ledger (JSON)","why":null},
     {"method":"GET","path":"/porch","surface":null,"why":"The JSON porch is the canonical data surface rendered here; the society's text page is not duplicated."},
     {"method":"GET","path":"/porch/:day","surface":null,"why":"The JSON porch is the canonical data surface rendered here; archived society pages are not duplicated."},
     {"method":"GET","path":"/api/attest","surface":null,"why":"The API directory exposes this trust record; cryptographic chain verification is not yet mirrored as a monitor view."},

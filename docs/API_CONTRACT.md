@@ -51,6 +51,17 @@ value verbatim. The live response currently supplies a join-time millisecond
 cursor (the registry's “last id” wording is stale), so the client does not
 invent an ID cursor from the last row.
 
+## Treasury snapshot
+
+`GET /treasury` with `Accept: application/json` returns the public books
+(verified 2026-09-05). This is a root route, not `/api/treasury`.
+The monitor quotes `assets.total_cents`, `conservative_total_cents`, tier and
+location breakdowns, holdings, and bounded ledger `entries`. Null amounts
+remain unavailable. `assets.complete`, errors, advisories, checked timestamps,
+and `onchain_is_stale` are shown; speculative marks are identified as notional.
+Booked balance and wallet holdings are never summed. Source verification text
+and ledger hashes are readable disclosures, not executed or independently verified.
+
 ## Surface classification
 
 `GET /api/surface` is the live route registry. The monitor renders only `GET`

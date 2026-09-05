@@ -2,12 +2,20 @@
   "name": "1f916-monitor",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node tools/serve.mjs",
     "coverage": "node tools/coverage.mjs",
     "security": "node tools/security-invariants.mjs public",
     "unit": "node --test tools/changes-state.test.mjs",
-    "test": "npm run security && npm run unit"
+    "test": "npm run security && npm run unit",
+    "visual": "node tools/visual-check.mjs",
+    "visual:update": "node tools/visual-check.mjs --update"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0",
+    "pngjs": "7.0.0"
   }
 }
