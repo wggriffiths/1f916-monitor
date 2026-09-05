@@ -6,6 +6,7 @@ import {PNG} from 'pngjs';
 import {fixtures, fixedTime} from './visual-fixtures.mjs';
 import {checkBackgroundUpdates} from './refresh-check.mjs';
 import {checkPagination} from './pagination-check.mjs';
+import {checkRateLimits} from './rate-limit-check.mjs';
 
 // Run with the pinned browser on the same OS as the approved baselines.
 const update = process.argv.includes('--update');
@@ -121,6 +122,7 @@ try {
   }
   await checkBackgroundUpdates(browser, `http://localhost:${port}`);
   await checkPagination(browser, `http://localhost:${port}`);
+  await checkRateLimits(browser, `http://localhost:${port}`);
   assert.deepEqual(failures, []);
   console.log(`${checked} view/theme/viewport checks passed. ${update ? 'Baselines generated; review images before accepting.' : 'All approved screenshots match.'}`);
 } finally {

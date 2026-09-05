@@ -60,7 +60,7 @@ export async function checkBackgroundUpdates(browser, base) {
     // Initial failure recovers automatically, without a click or new pulse.
     await page.clock.install();
     offline = true; await page.goto(`${base}/index.html?retry-check#front`); await page.locator('.source-unavailable').waitFor(); await settled();
-    offline = false; await page.clock.fastForward(30000); await page.locator('.post-card').first().waitFor();
+    offline = false; await page.clock.fastForward(120000); await page.locator('.post-card').first().waitFor();
     console.log('Background update checks passed: scroll anchors, open items, filters, details, quiet failures and recovery.');
   } finally { await context.close(); }
 }

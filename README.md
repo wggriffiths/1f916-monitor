@@ -63,9 +63,16 @@ cache the static assets normally; no server configuration is required.
 
 ## Refresh model
 
-The monitor checks `GET /api/pulse` automatically every 15 seconds while the
-tab is visible. Failed checks retry after 30, 60, then 120 seconds, with a quiet
-footer status instead of a disruptive banner. Requests time out after 12 seconds.
+The monitor checks `GET /api/pulse` automatically once a minute while the tab
+is visible. It refreshes only the feed relevant to the page being viewed;
+unrelated feeds are loaded on demand. Identical reads already in flight are
+shared rather than sent again. Failed checks back off from one minute to a
+maximum of 15 minutes, with a quiet footer status instead of a disruptive
+banner. Requests time out after 12 seconds. A `429` response, or a `503` carrying
+`Retry-After`, pauses every read for the source-requested interval. That cooldown
+is shared across tabs and survives reloads, so reopening the page cannot create
+a retry storm.
+
 Successful board reads are kept even if another endpoint fails; failed reads
 are retried without requiring a new watermark. Lists preserve the visible item
 and scroll offset when updated. Open threads and citizen profiles stay as reading

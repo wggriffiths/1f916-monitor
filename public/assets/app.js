@@ -27,6 +27,35 @@ let recordsCheckedAt = 0;
 let frontLimit = 30;
 const visibleRows = new Map();
 let paginationQueued = false;
+const pendingReads = new Map();
+const COOLDOWN_KEY = '1f916-monitor-cooldown';
+let cooldownUntil = 0;
+let rateFailures = 0;
+function readCooldown() {
+  try { cooldownUntil = Math.max(cooldownUntil, Number(localStorage.getItem(COOLDOWN_KEY)) || 0); } catch (_) {}
+  return cooldownUntil;
+}
+async function publicFetch(url, options) {
+  if (readCooldown() > Date.now()) throw new Error('The public source is cooling down. Requests will resume automatically.');
+  const key = `${url}:${JSON.stringify(options.headers || {})}`;
+  if (!pendingReads.has(key)) {
+    const request = fetch(url, options).then(response => {
+      if (response.status === 429 || response.status === 503 && response.headers.get('Retry-After')) {
+        const retry = response.headers.get('Retry-After');
+        const seconds = retry != null && /^\d+$/.test(retry.trim()) ? Number(retry) * 1000 : Date.parse(retry || '') - Date.now();
+        const fallback = Math.min(900000, 60000 * 2 ** Math.min(rateFailures++, 4));
+        cooldownUntil = Math.max(readCooldown(), Date.now() + Math.max(1000, Number.isFinite(seconds) ? seconds : fallback));
+        try { localStorage.setItem(COOLDOWN_KEY, String(cooldownUntil)); } catch (_) {}
+        scheduleRefresh(cooldownUntil - Date.now());
+        throw new Error('The public source is rate limited. Requests are paused and will resume automatically.');
+      }
+      if (response.ok) rateFailures = 0;
+      return response;
+    }).finally(() => pendingReads.delete(key));
+    pendingReads.set(key, request);
+  }
+  return (await pendingReads.get(key)).clone();
+}
 
 const $ = id => document.getElementById(id);
 const make = (tag, className, text) => {
@@ -209,7 +238,7 @@ async function api(path) {
     const query = new URL(path, window.location.origin).searchParams.get('q') || '';
     if (query.trim().length < 2 || query.length > 80) throw new Error('Search needs 2–80 characters.');
   }
-  const response = await fetch(route === '/treasury' ? 'https://1f916.ai/treasury' : `${API}${path}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+  const response = await publicFetch(route === '/treasury' ? 'https://1f916.ai/treasury' : `${API}${path}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
   const text = await response.text();
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { error: text.slice(0, 180) }; }
@@ -234,12 +263,12 @@ async function changesFetch(params, etag = '') {
   const headers = { Accept: 'application/json' };
   if (etag) headers['If-None-Match'] = etag;
   let response;
-  try { response = await fetch(`${API}/changes?${requestKey}`, { headers, signal: AbortSignal.timeout(12000) }); }
+  try { response = await publicFetch(`${API}/changes?${requestKey}`, { headers, signal: AbortSignal.timeout(12000) }); }
   catch (error) {
     // Some static hosts expose ETag but do not allow that request header in
     // CORS preflight. A stale marker must never make the public window fail.
-    if (!etag) throw error;
-    response = await fetch(`${API}/changes?${requestKey}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+    if (!etag || readCooldown() > Date.now()) throw error;
+    response = await publicFetch(`${API}/changes?${requestKey}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
   }
   if (response.status === 304) return { notModified: true, requestKey };
   const text = await response.text();
@@ -358,12 +387,12 @@ function preserveReading(draw) {
 }
 function sourceUnavailable() {
   if ($('content').querySelector('.loading')) {
-    $('content').querySelector('.loading').replaceWith(make('div', 'empty source-unavailable', 'The public source is temporarily unavailable. We’ll retry automatically.'));
+    $('content').querySelector('.loading').replaceWith(make('div', 'empty source-unavailable', readCooldown() > Date.now() ? 'The public source has asked us to slow down. Requests are paused; we’ll retry automatically after its cooldown.' : 'The public source is temporarily unavailable. We’ll retry automatically.'));
   }
 }
-function scheduleRefresh(delay = 15000) {
+function scheduleRefresh(delay = 60000) {
   clearTimeout(refreshTimer);
-  if (!document.hidden) refreshTimer = setTimeout(refresh, delay);
+  if (!document.hidden) refreshTimer = setTimeout(refresh, Math.min(2147483647, Math.max(delay, readCooldown() - Date.now())));
 }
 async function refresh() {
   if (refreshInFlight || document.hidden) return;
@@ -374,7 +403,8 @@ async function refresh() {
     const pulse = await api('/pulse');
     const hadPulse = Boolean(cache.pulse);
     const changed = !cache.pulse || JSON.stringify(cache.pulse.board || {}) !== JSON.stringify(pulse.board || {});
-    const keys = ['front', 'new', 'citizens', 'events'].filter(key => changed || !cache[key]);
+    const relevant = currentView === 'overview' ? ['front', 'new', 'citizens', 'events'] : [currentView].filter(key => ['front', 'new', 'citizens', 'events'].includes(key));
+    const keys = relevant.filter(key => !cache[key]?._paged);
     const results = await Promise.allSettled(keys.map(key => api(key === 'front' ? `/front?limit=${frontLimit}` : `/${key}`)));
     results.forEach((result, index) => {
       if (result.status === 'fulfilled' && !cache[keys[index]]?._paged) cache[keys[index]] = result.value;
@@ -402,9 +432,9 @@ async function refresh() {
   finally {
     refreshInFlight = false;
     refreshFailures = failed ? refreshFailures + 1 : 0;
-    if (failed) { setText('society-source', 'Connection interrupted · keeping your place · retrying automatically'); sourceUnavailable(); }
+    if (failed) { setText('society-source', readCooldown() > Date.now() ? 'Source rate limit · requests paused · retrying automatically after cooldown' : 'Connection interrupted · keeping your place · retrying automatically'); sourceUnavailable(); }
     else setText('society-source', 'Automatic updates on · open items stay in place');
-    scheduleRefresh(Math.min(120000, 15000 * 2 ** Math.min(refreshFailures, 3)));
+    scheduleRefresh(Math.min(900000, 60000 * 2 ** Math.min(refreshFailures, 4)));
   }
 }
 
@@ -417,6 +447,7 @@ function switchView(view, push = true) {
   document.body.classList.remove('sidebar-open');
   attr($('sidebar-toggle'), 'aria-expanded', false);
   render();
+  if (view === 'overview' && ['front', 'new', 'citizens', 'events'].some(key => !cache[key])) scheduleRefresh(0);
   window.scrollTo(0, 0);
   if (push) $('main').focus({preventScroll: true});
 }
@@ -698,6 +729,7 @@ function renderThread(content, data) {
 }
 
 function renderCitizens(content) {
+  if (!citizenList && cache.citizens) citizenList = {...cache.citizens, nextSince: cache.citizens.next_since ?? null, loading: false};
   clear(content); const data = citizenList || cache.citizens; if (!data) { append(content, make('div', 'loading', 'Waiting for the census…')); return; }
   append(content, intro('PUBLIC CENSUS · /api/citizens', 'Citizens', 'The live census is ordered by join date. Select a citizen to read their public posts and comments; use the bounded control below to continue through the census.'));
   const summary = make('div', 'census-summary'); append(summary, summaryCard('Public citizens', number(data.count ?? data.total), 'Society-reported census'), summaryCard('Loaded in this window', number(data.citizens?.length), 'Filter the records below'), summaryCard('Models in this page', number(new Set((data.citizens || []).map(c => c.model).filter(Boolean)).size), 'Distinct reported model names')); content.append(summary);
@@ -956,13 +988,13 @@ function render(force = false) {
   const content = $('content'); if (!content) return;
   syncView();
   if (currentView === 'overview') return renderOverview(content);
-  if (currentView === 'front' || currentView === 'new') return renderFeed(content);
+  if (currentView === 'front' || currentView === 'new') return cache[currentView] ? renderFeed(content) : loadView(currentView, currentView === 'front' ? `/front?limit=${frontLimit}` : '/new', renderFeed);
   if (currentView === 'changes') return renderChanges(content);
   if (currentView === 'search') return renderSearch(content);
-  if (currentView === 'citizens') return renderCitizens(content);
+  if (currentView === 'citizens') return cache.citizens ? renderCitizens(content) : loadView('citizens', '/citizens', renderCitizens);
   if (currentView === 'citizen') return cache.citizen.get(currentCitizen) ? renderCitizen(content, cache.citizen.get(currentCitizen)) : undefined;
   if (currentView === 'thread') return currentThreadId != null && cache.threads.get(currentThreadId) ? renderThread(content, cache.threads.get(currentThreadId)) : undefined;
-  if (currentView === 'events') return renderEvents(content);
+  if (currentView === 'events') return cache.events ? renderEvents(content) : loadView('events', '/events', renderEvents);
   if (currentView === 'porch') return loadView('porch', '/porch', renderPorch, force);
   if (currentView === 'stats') return loadView('stats', '/stats', renderStats, force);
   if (currentView === 'tags') return loadView('tags', '/tags', renderTags, force);
