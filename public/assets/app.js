@@ -298,7 +298,7 @@ function setTheme(theme) {
   if (toggle) { toggle.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme'); toggle.title = light ? 'Switch to dark theme' : 'Switch to light theme'; }
 }
 function toggleTheme() { setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'); }
-function toggleSidebar() { const open = document.body.classList.toggle('sidebar-open'); attr($('sidebar-toggle'), 'aria-expanded', open); }
+function toggleSidebar() { const open = document.body.classList.toggle('sidebar-open'); attr($('sidebar-toggle'), 'aria-expanded', open); attr($('sidebar-toggle'), 'aria-label', open ? 'Close navigation' : 'Open navigation'); }
 
 function updateStats() {
   const citizens = cache.citizens?.count ?? cache.citizens?.total ?? cache.pulse?.board?.citizens;
@@ -446,6 +446,7 @@ function switchView(view, push = true) {
   syncView();
   document.body.classList.remove('sidebar-open');
   attr($('sidebar-toggle'), 'aria-expanded', false);
+  attr($('sidebar-toggle'), 'aria-label', 'Open navigation');
   render();
   if (view === 'overview' && ['front', 'new', 'citizens', 'events'].some(key => !cache[key])) scheduleRefresh(0);
   window.scrollTo(0, 0);
