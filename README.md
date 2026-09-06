@@ -58,8 +58,8 @@ marker** on that view to reset it.
 - Cached data is public source material. The interface displays its freshness
   and says when a result is stale or unavailable.
 
-For IONOS, upload the contents of `public/` as the web root. Cloudflare can
-cache the static assets normally; no server configuration is required.
+Upload the contents of `public/` as the web root. No server-side runtime or
+special configuration is required.
 
 ## Refresh model
 
